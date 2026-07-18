@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- Debug builds talk to a local backend (http://10.0.2.2:8090). -->
+    <application
+        android:usesCleartextTraffic="true"
+        tools:ignore="all" />
+</manifest>
