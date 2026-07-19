@@ -166,12 +166,17 @@ fun GlassChip(text: String, icon: ImageVector? = null) {
 }
 
 // MARK: "● Group name" chip — tint identifies the group across Tonight surfaces.
+// Matches iOS chipColors [court, purple, success, cork]: the theme roles
+// resolve to their brighter dark-mode variants, so chips read correctly in
+// both appearances (the purple is a fixed accent on both platforms).
 
-val groupChipColors = listOf(
-    Color(0xFF1A54C9), Color(0xFF7A54C9), Color(0xFF1FA55C), Color(0xFFF4633A)
-)
-
-fun groupChipColor(index: Int): Color = groupChipColors[index % groupChipColors.size]
+@Composable
+fun groupChipColor(index: Int): Color = when (index % 4) {
+    0 -> Theme.court
+    1 -> Color(0xFF7A54C9)
+    2 -> Theme.success
+    else -> Theme.cork
+}
 
 @Composable
 fun GroupDotChip(name: String, tint: Color) {
@@ -351,13 +356,23 @@ fun RallyTextField(
     keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
     textStyle: TextStyle? = null,
     centered: Boolean = false,
+    alignEnd: Boolean = false,
     borderColor: Color? = null,
 ) {
     val shape = RoundedCornerShape(Theme.buttonRadius)
     val style = (textStyle ?: Theme.body(15f)).copy(
         color = Theme.ink,
-        textAlign = if (centered) TextAlign.Center else TextAlign.Start
+        textAlign = when {
+            centered -> TextAlign.Center
+            alignEnd -> TextAlign.End
+            else -> TextAlign.Start
+        }
     )
+    val boxAlign = when {
+        centered -> Alignment.Center
+        alignEnd -> Alignment.CenterEnd
+        else -> Alignment.CenterStart
+    }
     BasicTextField(
         value = value,
         onValueChange = onValueChange,
@@ -370,7 +385,7 @@ fun RallyTextField(
         decorationBox = { inner ->
             Box(
                 Modifier.padding(horizontal = 12.dp, vertical = 11.dp),
-                contentAlignment = if (centered) Alignment.Center else Alignment.CenterStart
+                contentAlignment = boxAlign
             ) {
                 if (value.isEmpty()) {
                     Text(placeholder, style = style.copy(color = Theme.inkMuted.copy(alpha = 0.6f)))

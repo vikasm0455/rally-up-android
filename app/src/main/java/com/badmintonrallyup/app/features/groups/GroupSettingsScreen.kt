@@ -162,8 +162,11 @@ fun GroupSettingsScreen(onBack: () -> Unit) {
     }
 
     if (showVenue) {
-        BackHandler { showVenue = false }
-        VenueSetupScreen(onBack = { showVenue = false })
+        // Reload on return so a saved venue name / court range is reflected
+        // (mirrors iOS onSaved). A no-op save/cancel just re-fetches the same
+        // data, which is harmless.
+        BackHandler { showVenue = false; scope.launch { load() } }
+        VenueSetupScreen(onBack = { showVenue = false; scope.launch { load() } })
         return
     }
 

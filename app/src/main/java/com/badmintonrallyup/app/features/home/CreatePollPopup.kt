@@ -32,7 +32,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.badmintonrallyup.app.api.ApiClient
 import com.badmintonrallyup.app.api.PollView
@@ -42,7 +41,6 @@ import com.badmintonrallyup.app.designsystem.GlassPopup
 import com.badmintonrallyup.app.designsystem.RallyTextField
 import com.badmintonrallyup.app.designsystem.SectionLabel
 import com.badmintonrallyup.app.designsystem.Theme
-import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 
@@ -61,12 +59,10 @@ fun CreatePollPopup(onDismiss: () -> Unit, onCreated: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
 
     suspend fun create() {
-        val itemHeightPx = with(density) { WheelItemHeight.toPx() }
-        val hour = centeredIndex(hourState, itemHeightPx, 24)
-        val minute = centeredIndex(minuteState, itemHeightPx, 60)
+        val hour = centeredIndex(hourState, 24)
+        val minute = centeredIndex(minuteState, 60)
         busy = true
         try {
             ApiClient.post<PollView, CreatePollRequest>(
@@ -139,9 +135,8 @@ fun CreatePollPopup(onDismiss: () -> Unit, onCreated: () -> Unit) {
 @Composable
 private fun TimeWheel(state: LazyListState, count: Int, pad: Boolean) {
     val fling = rememberSnapFlingBehavior(lazyListState = state)
-    val itemHeightPx = with(LocalDensity.current) { WheelItemHeight.toPx() }
-    val selected by remember(state, itemHeightPx) {
-        derivedStateOf { centeredIndex(state, itemHeightPx, count) }
+    val selected by remember(state) {
+        derivedStateOf { centeredIndex(state, count) }
     }
     LazyColumn(
         state = state,
@@ -165,9 +160,16 @@ private fun TimeWheel(state: LazyListState, count: Int, pad: Boolean) {
     }
 }
 
-/** Index of the row sitting in the wheel's center slot (exact once snapped). */
-private fun centeredIndex(state: LazyListState, itemHeightPx: Float, count: Int): Int {
-    val raw = state.firstVisibleItemIndex +
-        (state.firstVisibleItemScrollOffset / itemHeightPx).roundToInt()
-    return raw.coerceIn(0, count - 1)
+/**
+ * Index of the row sitting in the wheel's center slot. Uses layoutInfo to pick
+ * the visible item whose center is nearest the viewport center — robust to
+ * contentPadding, so the highlighted row and the submitted value always agree.
+ */
+private fun centeredIndex(state: LazyListState, count: Int): Int {
+    val layout = state.layoutInfo
+    val viewportCenter = (layout.viewportStartOffset + layout.viewportEndOffset) / 2f
+    val nearest = layout.visibleItemsInfo.minByOrNull {
+        kotlin.math.abs((it.offset + it.size / 2f) - viewportCenter)
+    }
+    return (nearest?.index ?: 0).coerceIn(0, count - 1)
 }

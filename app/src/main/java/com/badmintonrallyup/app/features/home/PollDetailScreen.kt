@@ -175,7 +175,7 @@ fun PollDetailScreen(pollId: UUID, onBack: () -> Unit) {
                     Modifier.fillMaxWidth().padding(top = 60.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    CircularProgressIndicator(color = Theme.court)
+                    CircularProgressIndicator(color = Theme.inkMuted)
                 }
             }
         }

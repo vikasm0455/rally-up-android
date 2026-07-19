@@ -265,6 +265,7 @@ fun PostLoginScreen(onDone: () -> Unit, onClose: () -> Unit) {
                         textStyle = Theme.emphasis(14f).copy(
                             color = Theme.cork, fontFamily = FontFamily.Monospace
                         ),
+                        alignEnd = true,
                         borderColor = Color.Transparent,
                         modifier = Modifier.weight(1f)
                     )
