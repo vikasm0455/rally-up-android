@@ -170,6 +170,31 @@ fun MoreScreen() {
             }
         }
 
+        // MARK: About — legal links (matches iOS More → About)
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionLabel("About")
+            Column(Modifier.card(padding = 0.dp)) {
+                val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                Text(
+                    "Terms of Service",
+                    style = Theme.body(15f), color = Theme.ink,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { uriHandler.openUri("https://badmintonrallyup.com/terms") }
+                        .padding(horizontal = 14.dp, vertical = 13.dp)
+                )
+                HorizontalDivider(color = Theme.line, thickness = 1.dp)
+                Text(
+                    "Privacy Policy",
+                    style = Theme.body(15f), color = Theme.ink,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { uriHandler.openUri("https://badmintonrallyup.com/privacy") }
+                        .padding(horizontal = 14.dp, vertical = 13.dp)
+                )
+            }
+        }
+
         // MARK: Sign out / delete account (Apple 5.1.1 parity)
         Column(Modifier.card(padding = 0.dp)) {
             Text(

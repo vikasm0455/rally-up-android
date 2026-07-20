@@ -35,6 +35,10 @@ import com.badmintonrallyup.app.designsystem.AppHaptics
 import com.badmintonrallyup.app.designsystem.GlassButton
 import com.badmintonrallyup.app.designsystem.RallyTextField
 import com.badmintonrallyup.app.designsystem.Theme
+import androidx.compose.ui.text.LinkAnnotation
+import androidx.compose.ui.text.TextLinkStyles
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withLink
 import kotlinx.coroutines.launch
 
 private enum class Step { Details, Code }
@@ -145,6 +149,7 @@ fun AuthFlowScreen() {
                 ) {
                     scope.launch { sendCode() }
                 }
+                ConsentLine()
                 Text(
                     if (isSignup) "Have an account? Log in" else "New here? Create an account",
                     style = Theme.caption(),
@@ -200,4 +205,29 @@ fun AuthFlowScreen() {
         }
         Spacer(Modifier.weight(1f))
     }
+}
+
+// Clickwrap consent (store UGC expectation): continuing = agreement.
+// Shown on signup AND login, matching iOS.
+@Composable
+private fun ConsentLine() {
+    val court = Theme.court
+    val linkStyle = TextLinkStyles(style = SpanStyle(color = court))
+    Text(
+        buildAnnotatedString {
+            append("By continuing, you agree to our ")
+            withLink(LinkAnnotation.Url("https://badmintonrallyup.com/terms", linkStyle)) {
+                append("Terms")
+            }
+            append(" and ")
+            withLink(LinkAnnotation.Url("https://badmintonrallyup.com/privacy", linkStyle)) {
+                append("Privacy Policy")
+            }
+            append(".")
+        },
+        style = Theme.caption(11.5f),
+        color = Theme.inkMuted,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth()
+    )
 }
