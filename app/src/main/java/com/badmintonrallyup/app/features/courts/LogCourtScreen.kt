@@ -110,6 +110,7 @@ private data class CreateCourtReq(
     val playerCount: Int,
     val durationMinutes: Int,
     val startType: String,
+    val startAt: String? = null,
     val queueNumber: Int,
     val notes: String?,
 )
@@ -126,6 +127,7 @@ fun LogCourtScreen(editing: ReservationView? = null, onDone: () -> Unit, onClose
     var playerCount by remember { mutableStateOf(4) }
     var duration by remember { mutableStateOf(45) }
     var startsNow by remember { mutableStateOf(true) }
+    var startsAtMinutes by remember { mutableStateOf(defaultStartMinutes()) }
     var queue by remember { mutableStateOf(1) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -190,7 +192,8 @@ fun LogCourtScreen(editing: ReservationView? = null, onDone: () -> Unit, onClose
                     credentialIds = picked.toList(),
                     playerCount = playerCount,
                     durationMinutes = duration,
-                    startType = "now",
+                    startType = if (startsNow) "now" else "at_time",
+                    startAt = if (startsNow) null else rfc3339Today(startsAtMinutes),
                     queueNumber = if (startsNow) 1 else queue,
                     notes = null,
                 )
@@ -388,11 +391,35 @@ fun LogCourtScreen(editing: ReservationView? = null, onDone: () -> Unit, onClose
                 Spacer(Modifier.weight(1f))
                 Switch(
                     checked = startsNow,
-                    onCheckedChange = { startsNow = it },
+                    onCheckedChange = {
+                        startsNow = it
+                        if (!it) startsAtMinutes = defaultStartMinutes()
+                    },
                     colors = SwitchDefaults.colors(checkedTrackColor = Theme.court)
                 )
             }
             if (!startsNow) {
+                // Scheduled start: the ring shows "TO START" until this time,
+                // then flips to the countdown (start_type at_time).
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.card(12.dp)
+                ) {
+                    SectionLabel("Starts at")
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        formatMinutes(startsAtMinutes),
+                        style = Theme.emphasis(16f),
+                        color = Theme.court,
+                        modifier = Modifier.clickable {
+                            android.app.TimePickerDialog(
+                                context,
+                                { _, h, m -> startsAtMinutes = h * 60 + m },
+                                startsAtMinutes / 60, startsAtMinutes % 60, false
+                            ).show()
+                        }
+                    )
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.card(12.dp)
@@ -408,7 +435,9 @@ fun LogCourtScreen(editing: ReservationView? = null, onDone: () -> Unit, onClose
                 Text(err, style = Theme.caption(12f), color = Theme.cork)
             }
             GlassButton(
-                title = if (busy) "Saving…" else if (editing == null) "Start the clock" else "Save changes",
+                title = if (busy) "Saving…"
+                        else if (editing == null) (if (startsNow) "Start the clock" else "Save the court")
+                        else "Save changes",
                 enabled = !busy && courtNumber.toIntOrNull() != null && inRange,
             ) { scope.launch { submit() } }
         }
@@ -569,4 +598,28 @@ private fun StepperRow(value: Int, range: IntRange, onChange: (Int) -> Unit) {
             Icon(Icons.Outlined.Add, "increase", Modifier.size(18.dp), tint = Theme.court)
         }
     }
+}
+
+// MARK: Scheduled-start helpers (start_type at_time)
+
+/** Default "Starts at" = now + 15 minutes, as minutes since local midnight. */
+private fun defaultStartMinutes(): Int {
+    val t = java.time.LocalTime.now().plusMinutes(15)
+    return t.hour * 60 + t.minute
+}
+
+private fun formatMinutes(total: Int): String {
+    val h24 = total / 60
+    val m = total % 60
+    val am = h24 < 12
+    val h12 = when (val h = h24 % 12) { 0 -> 12; else -> h }
+    return "%d:%02d %s".format(h12, m, if (am) "AM" else "PM")
+}
+
+/** Today at the picked local time as an RFC3339 UTC instant. */
+private fun rfc3339Today(totalMinutes: Int): String {
+    val local = java.time.LocalDate.now()
+        .atTime(totalMinutes / 60, totalMinutes % 60)
+        .atZone(java.time.ZoneId.systemDefault())
+    return local.toInstant().toString()
 }
