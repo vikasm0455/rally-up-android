@@ -58,11 +58,17 @@ fun MoreScreen() {
 
     var showKcal by rememberSaveable { mutableStateOf(false) }
     var showHistory by rememberSaveable { mutableStateOf(false) }
+    var showBlocked by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     // AppLock.enabled is prefs-backed (not observable) — mirror it locally so
     // the switch recomposes, same behavior as the iOS binding.
     var lockEnabled by remember { mutableStateOf(appLock.enabled) }
 
+    if (showBlocked) {
+        BackHandler { showBlocked = false }
+        BlockedMembersScreen(onBack = { showBlocked = false })
+        return
+    }
     if (showKcal) {
         BackHandler { showKcal = false }
         KcalScreen(onBack = { showKcal = false })
@@ -175,6 +181,15 @@ fun MoreScreen() {
             SectionLabel("About")
             Column(Modifier.card(padding = 0.dp)) {
                 val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                Text(
+                    "Blocked members",
+                    style = Theme.body(15f), color = Theme.ink,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showBlocked = true }
+                        .padding(horizontal = 14.dp, vertical = 13.dp)
+                )
+                HorizontalDivider(color = Theme.line, thickness = 1.dp)
                 Text(
                     "Terms of Service",
                     style = Theme.body(15f), color = Theme.ink,

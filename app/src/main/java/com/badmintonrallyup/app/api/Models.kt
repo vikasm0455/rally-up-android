@@ -204,6 +204,7 @@ data class ReservationView(
     val courtNumber: Short,
     val attachedLogins: String? = null,
     val attachedCredentialIds: List<ApiUUID>,
+    val reservedBy: ApiUUID,
     val reservedByName: String,
     val courtType: String,       // full | half
     val playerCount: Short? = null,
@@ -244,6 +245,7 @@ data class CredentialView(
     val id: ApiUUID,
     val bintangName: String,
     val bintangPassword: String,
+    val postedBy: ApiUUID,
     val postedByName: String,
     val hasScreenshot: Boolean,
     val inUse: Boolean,
@@ -313,3 +315,11 @@ data class KcalHistory(
         val kcal: Short,
     )
 }
+
+// MARK: Moderation (Guideline 1.2)
+
+@Serializable
+data class BlockedUser(
+    val id: ApiUUID,
+    val displayName: String,
+)

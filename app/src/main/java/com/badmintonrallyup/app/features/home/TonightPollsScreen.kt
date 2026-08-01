@@ -51,6 +51,9 @@ import com.badmintonrallyup.app.designsystem.ScreenTopBar
 import com.badmintonrallyup.app.designsystem.Theme
 import com.badmintonrallyup.app.designsystem.card
 import com.badmintonrallyup.app.designsystem.groupChipColor
+import com.badmintonrallyup.app.features.more.ModerationAction
+import com.badmintonrallyup.app.features.more.ModerationConfirmPopup
+import com.badmintonrallyup.app.features.more.ModerationMenu
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import java.util.UUID
@@ -63,6 +66,8 @@ fun TonightPollsScreen(onChanged: () -> Unit, onBack: () -> Unit) {
     var polls by remember { mutableStateOf(listOf<TonightPoll>()) }
     var busyPoll by remember { mutableStateOf<UUID?>(null) }
     var loaded by remember { mutableStateOf(false) }
+    var moderating by remember { mutableStateOf<ModerationAction?>(null) }
+
     var openPollId by rememberSaveable { mutableStateOf<UUID?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -125,13 +130,22 @@ fun TonightPollsScreen(onChanged: () -> Unit, onBack: () -> Unit) {
                     tint = groupChipColor(index),
                     busy = busyPoll == poll.id,
                     onOpen = { openPollId = poll.id },
-                    onVote = { option -> scope.launch { vote(poll, option) } }
+                    onVote = { option -> scope.launch { vote(poll, option) } },
+                    onModerate = { moderating = it }
                 )
             }
         }
     }
 
     LaunchedEffect(Unit) { load() }
+
+    moderating?.let { action ->
+        ModerationConfirmPopup(
+            action = action,
+            onDone = { moderating = null; scope.launch { load(); onChanged() } },
+            onCancel = { moderating = null },
+        )
+    }
 }
 
 @Composable
@@ -141,12 +155,16 @@ private fun PollCard(
     busy: Boolean,
     onOpen: () -> Unit,
     onVote: (String) -> Unit,
+    onModerate: (ModerationAction) -> Unit,
 ) {
     Column(Modifier.card(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             GroupDotChip(name = poll.groupName, tint = tint)
             Spacer(Modifier.weight(1f))
             StatusChip(poll.myVote)
+            ModerationMenu(
+                reportLabel = "poll", reportType = "poll", reportId = poll.id,
+            ) { onModerate(it) }
         }
         Row(
             Modifier.fillMaxWidth().clickable { onOpen() },

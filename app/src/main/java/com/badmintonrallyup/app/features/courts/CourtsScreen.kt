@@ -52,6 +52,9 @@ import com.badmintonrallyup.app.designsystem.Theme
 import com.badmintonrallyup.app.designsystem.TimerRing
 import com.badmintonrallyup.app.designsystem.card
 import kotlinx.coroutines.delay
+import com.badmintonrallyup.app.features.more.ModerationAction
+import com.badmintonrallyup.app.features.more.ModerationConfirmPopup
+import com.badmintonrallyup.app.features.more.ModerationMenu
 import kotlinx.coroutines.launch
 import java.time.Instant
 
@@ -62,6 +65,8 @@ fun CourtsScreen() {
     var reservations by remember { mutableStateOf<List<ReservationView>>(emptyList()) }
     var showLogCourt by rememberSaveable { mutableStateOf(false) }
     var editingReservation by remember { mutableStateOf<ReservationView?>(null) }
+    var moderating by remember { mutableStateOf<ModerationAction?>(null) }
+
 
     // TimelineView(.periodic(from: .now, by: 1)) → 1s ticker.
     var now by remember { mutableStateOf(Instant.now()) }
@@ -97,6 +102,14 @@ fun CourtsScreen() {
     }
 
     LaunchedEffect(Unit) { load() }
+
+    moderating?.let { action ->
+        ModerationConfirmPopup(
+            action = action,
+            onDone = { moderating = null; scope.launch { load() } },
+            onCancel = { moderating = null },
+        )
+    }
 
     Column(
         modifier = Modifier
@@ -138,8 +151,10 @@ fun CourtsScreen() {
                     active.forEach { r ->
                         CourtRow(
                             r = r, now = now,
+                            mine = r.reservedBy == session.me?.id,
                             onDone = { scope.launch { complete(r) } },
-                            onEdit = { editingReservation = r }
+                            onEdit = { editingReservation = r },
+                            onModerate = { moderating = it }
                         )
                     }
                 }
@@ -195,8 +210,10 @@ fun CourtsScreen() {
 private fun CourtRow(
     r: ReservationView,
     now: Instant,
+    mine: Boolean,
     onDone: () -> Unit,
     onEdit: () -> Unit,
+    onModerate: (ModerationAction) -> Unit,
 ) {
     val queued = now.isBefore(r.startAt)
     val frac = if (queued) 0.15 else CourtClock.fraction(start = r.startAt, expiry = r.expiryAt, now = now)
@@ -244,6 +261,11 @@ private fun CourtRow(
             MiniButton("Done", Theme.success, onDone)
             MiniButton("Edit", Theme.court, onEdit)
         }
+        ModerationMenu(
+            reportLabel = "court", reportType = "reservation", reportId = r.id,
+            blockUserId = if (mine) null else r.reservedBy,
+            blockName = if (mine) null else r.reservedByName,
+        ) { onModerate(it) }
     }
 }
 

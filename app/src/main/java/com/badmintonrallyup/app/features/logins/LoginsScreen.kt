@@ -50,6 +50,9 @@ import com.badmintonrallyup.app.designsystem.SectionLabel
 import com.badmintonrallyup.app.designsystem.StatusBadge
 import com.badmintonrallyup.app.designsystem.Theme
 import com.badmintonrallyup.app.designsystem.card
+import com.badmintonrallyup.app.features.more.ModerationAction
+import com.badmintonrallyup.app.features.more.ModerationConfirmPopup
+import com.badmintonrallyup.app.features.more.ModerationMenu
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -60,6 +63,7 @@ fun LoginsScreen() {
     var credentials by remember { mutableStateOf(listOf<CredentialView>()) }
     var copied by remember { mutableStateOf<UUID?>(null) }
     var showPost by rememberSaveable { mutableStateOf(false) }
+    var moderating by remember { mutableStateOf<ModerationAction?>(null) }
 
     val load: suspend () -> Unit = {
         if (!session.hasActiveGroup) {
@@ -75,6 +79,13 @@ fun LoginsScreen() {
 
     LaunchedEffect(Unit) { load() }
 
+    moderating?.let { action ->
+        ModerationConfirmPopup(
+            action = action,
+            onDone = { moderating = null; scope.launch { load() } },
+            onCancel = { moderating = null },
+        )
+    }
     if (showPost) {
         FullScreenCover(onDismiss = { showPost = false }) {
             PostLoginScreen(
@@ -124,7 +135,8 @@ fun LoginsScreen() {
             } else {
                 SectionLabel("Tonight · ${credentials.size}")
                 credentials.forEach { c ->
-                    LoginCard(c, copied) { copiedId -> copied = copiedId }
+                    LoginCard(c, copied, onCopied = { copiedId -> copied = copiedId },
+                              onModerate = { moderating = it })
                 }
                 Text(
                     "Clears tonight · visible only to the groups each owner picked",
@@ -138,7 +150,7 @@ fun LoginsScreen() {
 }
 
 @Composable
-private fun LoginCard(c: CredentialView, copied: UUID?, onCopied: (UUID) -> Unit) {
+private fun LoginCard(c: CredentialView, copied: UUID?, onCopied: (UUID) -> Unit, onModerate: (ModerationAction) -> Unit) {
     val clipboard = LocalClipboardManager.current
     Column(
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -157,6 +169,11 @@ private fun LoginCard(c: CredentialView, copied: UUID?, onCopied: (UUID) -> Unit
                 text = if (c.inUse) c.inUseLabel else "free",
                 kind = if (c.inUse) BadgeKind.Used else BadgeKind.Free
             )
+            ModerationMenu(
+                reportLabel = "login", reportType = "credential", reportId = c.id,
+                blockUserId = if (c.isMine) null else c.postedBy,
+                blockName = if (c.isMine) null else c.postedByName,
+            ) { onModerate(it) }
         }
         Text(
             c.bintangPassword,
