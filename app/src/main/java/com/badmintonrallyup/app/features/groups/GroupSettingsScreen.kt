@@ -89,13 +89,18 @@ fun GroupSettingsScreen(onBack: () -> Unit) {
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var showVenue by rememberSaveable { mutableStateOf(false) }
+    var groupName by remember { mutableStateOf("") }
 
     val isAdmin = detail?.myRole == "admin"
+    val trimmedName = groupName.trim()
+    val nameChanged = detail != null && trimmedName != detail?.name &&
+        trimmedName.length in 2..60
 
     suspend fun load() {
         detail = try {
             ApiClient.get<GroupDetail>("/api/groups/current")
         } catch (e: Exception) { null }
+        detail?.let { groupName = it.name }
         autoPoll = try {
             ApiClient.get<AutoPollConfig>("/api/config/auto-poll")
         } catch (e: Exception) { null }
@@ -161,6 +166,24 @@ fun GroupSettingsScreen(onBack: () -> Unit) {
         }
     }
 
+    // Admin-only rename (PUT /api/groups/current) — the whole group sees the
+    // new name everywhere on their next refresh.
+    suspend fun rename() {
+        busy = true
+        try {
+            val updated: GroupDetail = ApiClient.put(
+                "/api/groups/current", RenameGroupReq(groupName.trim()))
+            detail = updated
+            groupName = updated.name
+            session.refreshMe()
+            AppHaptics.success()
+        } catch (e: Exception) {
+            error = e.message
+        } finally {
+            busy = false
+        }
+    }
+
     if (showVenue) {
         // Reload on return so a saved venue name / court range is reflected
         // (mirrors iOS onSaved). A no-op save/cancel just re-fetches the same
@@ -185,6 +208,26 @@ fun GroupSettingsScreen(onBack: () -> Unit) {
         ) {
             val d = detail
             if (d != null) {
+                if (isAdmin) {
+                    SectionLabel("Group name")
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        RallyTextField(
+                            value = groupName,
+                            onValueChange = { groupName = it },
+                            placeholder = "Group name",
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (nameChanged) {
+                            GlassButton("Save", Modifier.width(84.dp), enabled = !busy) {
+                                scope.launch { rename() }
+                            }
+                        }
+                    }
+                }
+
                 SectionLabel("Members · ${d.members.size}")
                 Column(Modifier.card(4.dp)) {
                     d.members.forEach { m ->
@@ -391,3 +434,6 @@ private fun MemberRow(
         }
     }
 }
+
+@kotlinx.serialization.Serializable
+private data class RenameGroupReq(val name: String)
