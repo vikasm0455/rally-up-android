@@ -97,6 +97,13 @@ object ApiClient {
         return decodePayload(data.first, data.second)
     }
 
+    /** Like post, but also surfaces the envelope's human-readable message
+     *  (e.g. "Invite sent to …" vs the email-couldn't-be-sent caveat). */
+    suspend inline fun <reified T, reified B> postWithMessage(path: String, body: B?): Pair<T, String?> {
+        val data = rawSend("POST", path, body?.let { json.encodeToString(serializer<B>(), it) })
+        return decodePayloadWithMessage(data.first, data.second)
+    }
+
     /** Executes with auth + refresh-on-401; returns (bodyBytes, status). */
     suspend fun rawSend(
         method: String, path: String, jsonBody: String?, isRetry: Boolean = false
@@ -128,7 +135,10 @@ object ApiClient {
         }
     }
 
-    inline fun <reified T> decodePayload(bytes: ByteArray, status: Int): T {
+    inline fun <reified T> decodePayload(bytes: ByteArray, status: Int): T =
+        decodePayloadWithMessage<T>(bytes, status).first
+
+    inline fun <reified T> decodePayloadWithMessage(bytes: ByteArray, status: Int): Pair<T, String?> {
         val envelope = try {
             json.decodeFromString<ApiEnvelope<T>>(bytes.decodeToString())
         } catch (e: Exception) {
@@ -142,9 +152,9 @@ object ApiClient {
             throw ApiException.Server(envelope.message ?: "Something went wrong ($status).")
         }
         val payload = envelope.data
-        if (payload != null) return payload
+        if (payload != null) return payload to envelope.message
         // Endpoints that return only a message decode as EmptyData.
-        if (T::class == EmptyData::class) return EmptyData as T
+        if (T::class == EmptyData::class) return (EmptyData as T) to envelope.message
         throw ApiException.Server(envelope.message ?: "Empty response.")
     }
 

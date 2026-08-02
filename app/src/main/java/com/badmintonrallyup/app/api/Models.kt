@@ -127,6 +127,14 @@ data class GroupInviteRow(
     val expiresAt: ApiInstant,
 )
 
+/** POST /api/groups/invites — refreshed pending list + whether the invite
+ *  email actually went out ("sent" | "failed" | "skipped"). */
+@Serializable
+data class SendInviteResult(
+    val invites: List<GroupInviteRow>,
+    val emailDelivery: String,
+)
+
 @Serializable
 data class AutoPollConfig(
     val enabled: Boolean,

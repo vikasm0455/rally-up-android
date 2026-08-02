@@ -53,6 +53,7 @@ import com.badmintonrallyup.app.api.EmptyData
 import com.badmintonrallyup.app.api.GroupDetail
 import com.badmintonrallyup.app.api.GroupInviteRow
 import com.badmintonrallyup.app.api.GroupMemberRow
+import com.badmintonrallyup.app.api.SendInviteResult
 import com.badmintonrallyup.app.designsystem.AppHaptics
 import com.badmintonrallyup.app.designsystem.BadgeKind
 import com.badmintonrallyup.app.designsystem.GlassButton
@@ -70,6 +71,9 @@ import java.util.UUID
 @Serializable
 private data class InviteReq(val email: String)
 
+/** Outcome of the last invite attempt, shown inline under the email field. */
+private enum class InviteStatusKind { SENT, EMAIL_FAILED, FAILED }
+
 @Serializable
 private data class RoleReq(val role: String)
 
@@ -85,6 +89,12 @@ fun GroupSettingsScreen(onBack: () -> Unit) {
     var pending by remember { mutableStateOf<List<GroupInviteRow>>(emptyList()) }
     var autoPoll by remember { mutableStateOf<AutoPollConfig?>(null) }
     var inviteEmail by remember { mutableStateOf("") }
+    var inviting by remember { mutableStateOf(false) }
+    // Saveable so the amber "email couldn't be sent" caveat — which can't be
+    // re-derived from the server — survives process death / config changes.
+    var inviteStatus by rememberSaveable {
+        mutableStateOf<Pair<InviteStatusKind, String>?>(null)
+    }
     var confirmLeave by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -111,19 +121,31 @@ fun GroupSettingsScreen(onBack: () -> Unit) {
         }
     }
 
+    // The server returns the refreshed invite list plus email_delivery
+    // ("sent" | "failed" | "skipped") — surfaced inline under the field.
+    // The server's message is shown verbatim (it carries the stored,
+    // lowercased address, matching the pending row below).
     suspend fun invite() {
-        busy = true
+        if (inviting) return
+        inviting = true
+        inviteStatus = null
+        val sentTo = inviteEmail.trim()
         try {
-            ApiClient.post<GroupInviteRow, InviteReq>(
-                "/api/groups/invites", InviteReq(inviteEmail.trim())
+            val (result, message) = ApiClient.postWithMessage<SendInviteResult, InviteReq>(
+                "/api/groups/invites", InviteReq(sentTo)
             )
+            pending = result.invites
             inviteEmail = ""
             AppHaptics.success()
-            load()
+            inviteStatus = if (result.emailDelivery == "sent") {
+                InviteStatusKind.SENT to (message ?: "Invite sent to ${sentTo.lowercase()}")
+            } else {
+                InviteStatusKind.EMAIL_FAILED to (message ?: "Invite saved, but the email couldn't be sent.")
+            }
         } catch (e: Exception) {
-            error = e.message
+            inviteStatus = InviteStatusKind.FAILED to (e.message ?: "Something went wrong.")
         } finally {
-            busy = false
+            inviting = false
         }
     }
 
@@ -255,10 +277,44 @@ fun GroupSettingsScreen(onBack: () -> Unit) {
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email)
                         )
                         GlassButton(
-                            "Send",
+                            if (inviting) "Sending…" else "Send",
                             modifier = Modifier.width(84.dp),
-                            enabled = !busy && inviteEmail.contains("@")
+                            enabled = !inviting && inviteEmail.contains("@")
                         ) { scope.launch { invite() } }
+                    }
+                    // Keep the last status around so the fade-out still has
+                    // content to draw (matches the iOS .transition(.opacity)).
+                    var lastShownStatus by remember {
+                        mutableStateOf<Pair<InviteStatusKind, String>?>(null)
+                    }
+                    androidx.compose.animation.AnimatedVisibility(
+                        visible = inviteStatus != null,
+                        enter = androidx.compose.animation.fadeIn(),
+                        exit = androidx.compose.animation.fadeOut()
+                    ) {
+                        (inviteStatus ?: lastShownStatus)?.let { (kind, text) ->
+                            val statusColor = when (kind) {
+                                InviteStatusKind.SENT -> Theme.success
+                                InviteStatusKind.EMAIL_FAILED -> Theme.amber
+                                InviteStatusKind.FAILED -> Theme.cork
+                            }
+                            val glyph = when (kind) {
+                                InviteStatusKind.SENT -> "✓"
+                                InviteStatusKind.EMAIL_FAILED -> "⚠"
+                                InviteStatusKind.FAILED -> "✕"
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(glyph, style = Theme.caption(12f), color = statusColor)
+                                Text(text, style = Theme.caption(12f), color = statusColor)
+                            }
+                        }
+                    }
+                    LaunchedEffect(inviteStatus) {
+                        inviteStatus?.let { lastShownStatus = it }
+                        if (inviteStatus?.first == InviteStatusKind.SENT) {
+                            kotlinx.coroutines.delay(4_000)
+                            inviteStatus = null
+                        }
                     }
                     pending.forEach { inv ->
                         Row(
@@ -285,7 +341,12 @@ fun GroupSettingsScreen(onBack: () -> Unit) {
                 if (isAdmin) {
                     Row(
                         Modifier
-                            .clickable { showVenue = true }
+                            .clickable {
+                                // Don't resurrect a stale "Invite sent" with a
+                                // fresh 4s timer after coming back from venue.
+                                if (inviteStatus?.first == InviteStatusKind.SENT) inviteStatus = null
+                                showVenue = true
+                            }
                             .card(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
