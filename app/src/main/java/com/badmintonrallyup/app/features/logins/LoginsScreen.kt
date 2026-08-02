@@ -15,10 +15,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Key
+import androidx.compose.material.icons.outlined.MoreHoriz
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -37,15 +44,20 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
 import com.badmintonrallyup.app.LocalSession
 import com.badmintonrallyup.app.api.ApiClient
 import com.badmintonrallyup.app.api.CredentialView
+import com.badmintonrallyup.app.api.EmptyData
 import com.badmintonrallyup.app.api.inUseLabel
 import com.badmintonrallyup.app.designsystem.AppHaptics
 import com.badmintonrallyup.app.designsystem.BadgeKind
 import com.badmintonrallyup.app.designsystem.CreateOrJoinBanner
 import com.badmintonrallyup.app.designsystem.EmptyState
 import com.badmintonrallyup.app.designsystem.FullScreenCover
+import com.badmintonrallyup.app.designsystem.GlassButton
+import com.badmintonrallyup.app.designsystem.GlassPopup
+import com.badmintonrallyup.app.designsystem.RallyTextField
 import com.badmintonrallyup.app.designsystem.SectionLabel
 import com.badmintonrallyup.app.designsystem.StatusBadge
 import com.badmintonrallyup.app.designsystem.Theme
@@ -53,6 +65,7 @@ import com.badmintonrallyup.app.designsystem.card
 import com.badmintonrallyup.app.features.more.ModerationAction
 import com.badmintonrallyup.app.features.more.ModerationConfirmPopup
 import com.badmintonrallyup.app.features.more.ModerationMenu
+import kotlinx.serialization.Serializable
 import kotlinx.coroutines.launch
 import java.util.UUID
 
@@ -64,6 +77,8 @@ fun LoginsScreen() {
     var copied by remember { mutableStateOf<UUID?>(null) }
     var showPost by rememberSaveable { mutableStateOf(false) }
     var moderating by remember { mutableStateOf<ModerationAction?>(null) }
+    var editing by remember { mutableStateOf<CredentialView?>(null) }
+    var deleting by remember { mutableStateOf<CredentialView?>(null) }
 
     val load: suspend () -> Unit = {
         if (!session.hasActiveGroup) {
@@ -84,6 +99,20 @@ fun LoginsScreen() {
             action = action,
             onDone = { moderating = null; scope.launch { load() } },
             onCancel = { moderating = null },
+        )
+    }
+    editing?.let { cred ->
+        EditLoginPopup(
+            credential = cred,
+            onDone = { editing = null; scope.launch { load() } },
+            onCancel = { editing = null },
+        )
+    }
+    deleting?.let { cred ->
+        DeleteLoginPopup(
+            credential = cred,
+            onDone = { deleting = null; scope.launch { load() } },
+            onCancel = { deleting = null },
         )
     }
     if (showPost) {
@@ -136,7 +165,9 @@ fun LoginsScreen() {
                 SectionLabel("Tonight · ${credentials.size}")
                 credentials.forEach { c ->
                     LoginCard(c, copied, onCopied = { copiedId -> copied = copiedId },
-                              onModerate = { moderating = it })
+                              onModerate = { moderating = it },
+                              onEdit = { editing = it },
+                              onDelete = { deleting = it })
                 }
                 Text(
                     "Clears tonight · visible only to the groups each owner picked",
@@ -150,7 +181,14 @@ fun LoginsScreen() {
 }
 
 @Composable
-private fun LoginCard(c: CredentialView, copied: UUID?, onCopied: (UUID) -> Unit, onModerate: (ModerationAction) -> Unit) {
+private fun LoginCard(
+    c: CredentialView,
+    copied: UUID?,
+    onCopied: (UUID) -> Unit,
+    onModerate: (ModerationAction) -> Unit,
+    onEdit: (CredentialView) -> Unit,
+    onDelete: (CredentialView) -> Unit,
+) {
     val clipboard = LocalClipboardManager.current
     Column(
         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -169,11 +207,16 @@ private fun LoginCard(c: CredentialView, copied: UUID?, onCopied: (UUID) -> Unit
                 text = if (c.inUse) c.inUseLabel else "free",
                 kind = if (c.inUse) BadgeKind.Used else BadgeKind.Free
             )
-            ModerationMenu(
-                reportLabel = "login", reportType = "credential", reportId = c.id,
-                blockUserId = if (c.isMine) null else c.postedBy,
-                blockName = if (c.isMine) null else c.postedByName,
-            ) { onModerate(it) }
+            if (c.isMine) {
+                // Your own post: self-management, not moderation.
+                OwnLoginMenu(onEdit = { onEdit(c) }, onDelete = { onDelete(c) })
+            } else {
+                ModerationMenu(
+                    reportLabel = "login", reportType = "credential", reportId = c.id,
+                    blockUserId = c.postedBy,
+                    blockName = c.postedByName,
+                ) { onModerate(it) }
+            }
         }
         Text(
             c.bintangPassword,
@@ -183,5 +226,136 @@ private fun LoginCard(c: CredentialView, copied: UUID?, onCopied: (UUID) -> Unit
         if (copied == c.id) {
             Text("Copied", style = Theme.caption(11f), color = Theme.success)
         }
+    }
+}
+
+/** ⋯ on your own login: Edit / Delete (Report/Block stay on others' posts). */
+@Composable
+private fun OwnLoginMenu(onEdit: () -> Unit, onDelete: () -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box {
+        Icon(
+            Icons.Outlined.MoreHoriz, "more",
+            Modifier.size(22.dp).clickable { open = true },
+            tint = Theme.inkMuted
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text("Edit this login") },
+                leadingIcon = { Icon(Icons.Outlined.Edit, null, tint = Theme.inkMuted) },
+                onClick = { open = false; onEdit() }
+            )
+            DropdownMenuItem(
+                text = { Text("Delete this login", color = Color(0xFFC62828)) },
+                leadingIcon = { Icon(Icons.Outlined.Delete, null, tint = Color(0xFFC62828)) },
+                onClick = { open = false; onDelete() }
+            )
+        }
+    }
+}
+
+@Serializable
+private data class UpdateLoginReq(val bintangName: String, val bintangPassword: String)
+
+/** Owner fixes a typo in their posted login (PUT /api/credentials/:id). */
+@Composable
+private fun EditLoginPopup(
+    credential: CredentialView,
+    onDone: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var name by remember { mutableStateOf(credential.bintangName) }
+    var password by remember { mutableStateOf(credential.bintangPassword) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val valid = name.trim().isNotEmpty() && name.trim().length <= 50 &&
+        password.trim().isNotEmpty() && password.trim().length <= 50
+
+    GlassPopup(onDismiss = onCancel) {
+        Text("Edit login", style = Theme.emphasis(16f), color = Theme.ink)
+        Text(
+            "Everyone you shared it with sees the update on their next refresh.",
+            style = Theme.caption(12f), color = Theme.inkMuted,
+            textAlign = TextAlign.Center
+        )
+        SectionLabel("Bintang name")
+        RallyTextField(value = name, onValueChange = { name = it }, placeholder = "Name")
+        SectionLabel("Password")
+        RallyTextField(
+            value = password, onValueChange = { password = it }, placeholder = "Password",
+            textStyle = Theme.emphasis(15f).copy(
+                color = Theme.cork, fontFamily = FontFamily.Monospace
+            ),
+            keyboardOptions = KeyboardOptions(autoCorrect = false)
+        )
+        error?.let { Text(it, style = Theme.caption(12f), color = Theme.cork) }
+        GlassButton(if (busy) "Saving…" else "Save changes", enabled = !busy && valid) {
+            scope.launch {
+                if (busy) return@launch
+                busy = true
+                try {
+                    ApiClient.put<EmptyData, UpdateLoginReq>(
+                        "/api/credentials/${credential.id}",
+                        UpdateLoginReq(name.trim(), password.trim())
+                    )
+                    AppHaptics.success()
+                    onDone()
+                } catch (e: Exception) {
+                    error = e.message
+                } finally {
+                    busy = false
+                }
+            }
+        }
+        Text(
+            "Cancel", style = Theme.caption(13f), color = Theme.inkMuted,
+            modifier = Modifier.clickable { onCancel() }
+        )
+    }
+}
+
+/** Owner deletes their posted login (DELETE /api/credentials/:id). */
+@Composable
+private fun DeleteLoginPopup(
+    credential: CredentialView,
+    onDone: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    GlassPopup(onDismiss = onCancel) {
+        Text("Delete this login?", style = Theme.emphasis(16f), color = Theme.ink)
+        Text(
+            "It disappears right away for every group you shared it with. Courts already logged with it keep working.",
+            style = Theme.caption(12f), color = Theme.inkMuted,
+            textAlign = TextAlign.Center
+        )
+        error?.let { Text(it, style = Theme.caption(12f), color = Theme.cork) }
+        GlassButton(
+            if (busy) "Working…" else "Delete login",
+            tint = Color(0xFFC62828),
+            enabled = !busy,
+        ) {
+            scope.launch {
+                if (busy) return@launch
+                busy = true
+                try {
+                    ApiClient.delete<EmptyData>("/api/credentials/${credential.id}")
+                    AppHaptics.destructive()
+                    onDone()
+                } catch (e: Exception) {
+                    error = e.message
+                } finally {
+                    busy = false
+                }
+            }
+        }
+        Text(
+            "Cancel", style = Theme.caption(13f), color = Theme.inkMuted,
+            modifier = Modifier.clickable { onCancel() }
+        )
     }
 }
