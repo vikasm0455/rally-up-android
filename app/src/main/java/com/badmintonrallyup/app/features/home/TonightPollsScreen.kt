@@ -54,6 +54,8 @@ import com.badmintonrallyup.app.designsystem.groupChipColor
 import com.badmintonrallyup.app.features.more.ModerationAction
 import com.badmintonrallyup.app.features.more.ModerationConfirmPopup
 import com.badmintonrallyup.app.features.more.ModerationMenu
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import java.util.UUID
@@ -63,6 +65,8 @@ private data class TonightVoteReq(val vote: String)
 
 @Composable
 fun TonightPollsScreen(onChanged: () -> Unit, onBack: () -> Unit) {
+    val context = LocalContext.current
+    var shareBusy by remember { mutableStateOf(false) }
     var polls by remember { mutableStateOf(listOf<TonightPoll>()) }
     var busyPoll by remember { mutableStateOf<UUID?>(null) }
     var loaded by remember { mutableStateOf(false) }
@@ -131,7 +135,31 @@ fun TonightPollsScreen(onChanged: () -> Unit, onBack: () -> Unit) {
                     busy = busyPoll == poll.id,
                     onOpen = { openPollId = poll.id },
                     onVote = { option -> scope.launch { vote(poll, option) } },
-                    onModerate = { moderating = it }
+                    onModerate = { moderating = it },
+                    onShare = { pollId ->
+                        scope.launch {
+                            if (shareBusy) return@launch
+                            shareBusy = true
+                            try {
+                                val r = ApiClient.post<PollShareLinkRes, Unit>(
+                                    "/api/polls/$pollId/share-link", null
+                                )
+                                val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_TEXT, r.url)
+                                }
+                                context.startActivity(android.content.Intent.createChooser(send, null))
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    e.message ?: "Couldn't share the poll",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            } finally {
+                                shareBusy = false
+                            }
+                        }
+                    }
                 )
             }
         }
@@ -156,12 +184,21 @@ private fun PollCard(
     onOpen: () -> Unit,
     onVote: (String) -> Unit,
     onModerate: (ModerationAction) -> Unit,
+    onShare: (java.util.UUID) -> Unit,
 ) {
     Column(Modifier.card(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             GroupDotChip(name = poll.groupName, tint = tint)
             Spacer(Modifier.weight(1f))
             StatusChip(poll.myVote)
+            Icon(
+                Icons.Outlined.Share, "Share poll",
+                Modifier
+                    .size(26.dp)
+                    .clickable { onShare(poll.id) }
+                    .padding(3.dp),
+                tint = Theme.inkMuted
+            )
             ModerationMenu(
                 reportLabel = "poll", reportType = "poll", reportId = poll.id,
             ) { onModerate(it) }
@@ -242,3 +279,7 @@ private fun VotePicker(poll: TonightPoll, busy: Boolean, onVote: (String) -> Uni
         }
     }
 }
+
+
+@Serializable
+private data class PollShareLinkRes(val url: String)
