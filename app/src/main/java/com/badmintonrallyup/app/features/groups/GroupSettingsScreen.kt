@@ -44,7 +44,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.badmintonrallyup.app.LocalSession
 import com.badmintonrallyup.app.api.ApiClient
@@ -53,6 +58,8 @@ import com.badmintonrallyup.app.api.EmptyData
 import com.badmintonrallyup.app.api.GroupDetail
 import com.badmintonrallyup.app.api.GroupInviteRow
 import com.badmintonrallyup.app.api.GroupMemberRow
+import com.badmintonrallyup.app.api.InviteLink
+import com.badmintonrallyup.app.api.InviteLinkState
 import com.badmintonrallyup.app.api.SendInviteResult
 import com.badmintonrallyup.app.designsystem.AppHaptics
 import com.badmintonrallyup.app.designsystem.BadgeKind
@@ -95,6 +102,9 @@ fun GroupSettingsScreen(onBack: () -> Unit) {
     var inviteStatus by rememberSaveable {
         mutableStateOf<Pair<InviteStatusKind, String>?>(null)
     }
+    var inviteLink by remember { mutableStateOf<InviteLink?>(null) }
+    var linkLoadFailed by remember { mutableStateOf(false) }
+    var linkBusy by remember { mutableStateOf(false) }
     var confirmLeave by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -118,6 +128,41 @@ fun GroupSettingsScreen(onBack: () -> Unit) {
             pending = try {
                 ApiClient.get<List<GroupInviteRow>>("/api/groups/invites")
             } catch (e: Exception) { emptyList() }
+            // link == null means "no active link"; a thrown error means
+            // "unknown" — never show Create (it rotates) in that case.
+            try {
+                inviteLink = ApiClient.get<InviteLinkState>("/api/groups/invite-link").link
+                linkLoadFailed = false
+            } catch (e: Exception) {
+                linkLoadFailed = true
+            }
+        }
+    }
+
+    suspend fun createLink() {
+        if (linkBusy) return
+        linkBusy = true
+        try {
+            inviteLink = ApiClient.post<InviteLink, Unit>("/api/groups/invite-link", null)
+            AppHaptics.success()
+        } catch (e: Exception) {
+            error = e.message
+        } finally {
+            linkBusy = false
+        }
+    }
+
+    suspend fun disableLink() {
+        if (linkBusy) return
+        linkBusy = true
+        try {
+            ApiClient.delete<EmptyData>("/api/groups/invite-link")
+            inviteLink = null
+            AppHaptics.destructive()
+        } catch (e: Exception) {
+            error = e.message
+        } finally {
+            linkBusy = false
         }
     }
 
@@ -336,6 +381,28 @@ fun GroupSettingsScreen(onBack: () -> Unit) {
                             )
                         }
                     }
+
+                    Box(Modifier.padding(top = 4.dp)) { SectionLabel("Invite link") }
+                    if (linkLoadFailed) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                "Couldn't load the invite link.",
+                                style = Theme.caption(12f), color = Theme.inkMuted
+                            )
+                            Text(
+                                "Try again",
+                                style = Theme.emphasis(13f), color = Theme.court,
+                                modifier = Modifier.clickable { scope.launch { load() } }
+                            )
+                        }
+                    } else {
+                        InviteLinkSection(
+                            link = inviteLink,
+                            busy = linkBusy,
+                            onCreate = { scope.launch { createLink() } },
+                            onDisable = { scope.launch { disableLink() } },
+                        )
+                    }
                 }
 
                 if (isAdmin) {
@@ -498,3 +565,97 @@ private fun MemberRow(
 
 @kotlinx.serialization.Serializable
 private data class RenameGroupReq(val name: String)
+
+/** Shareable join link: one active per group, 7-day expiry, create = rotate. */
+@Composable
+private fun InviteLinkSection(
+    link: InviteLink?,
+    busy: Boolean,
+    onCreate: () -> Unit,
+    onDisable: () -> Unit,
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    var copied by remember { mutableStateOf(false) }
+
+    if (link == null) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            GlassButton(
+                if (busy) "Creating…" else "🔗 Create invite link",
+                modifier = Modifier.fillMaxWidth(),
+                enabled = !busy,
+            ) { onCreate() }
+            Text(
+                "Anyone with the link can join this group after signing in. It expires after 7 days.",
+                style = Theme.caption(11f), color = Theme.inkMuted
+            )
+        }
+    } else {
+        val daysLeft = (
+            java.time.Duration.between(java.time.Instant.now(), link.expiresAt).toDays() + 1
+        ).coerceAtLeast(1)
+        Column(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.card(12.dp)
+        ) {
+            Text(
+                link.url,
+                style = Theme.caption(12.5f).copy(fontFamily = FontFamily.Monospace),
+                color = Theme.court,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Theme.surface, RoundedCornerShape(Theme.buttonRadius))
+                    .padding(11.dp)
+            )
+            Text(
+                "Expires in $daysLeft day${if (daysLeft == 1L) "" else "s"} · ${link.joinCount} joined with this link · anyone with it can join after signing in.",
+                style = Theme.caption(11f), color = Theme.inkMuted
+            )
+            if (copied) {
+                Text("Copied", style = Theme.caption(11f), color = Theme.success)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                GlassButton("Share", modifier = Modifier.weight(1f)) {
+                    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(android.content.Intent.EXTRA_TEXT, link.url)
+                    }
+                    context.startActivity(android.content.Intent.createChooser(send, null))
+                }
+                GlassButton("Copy", modifier = Modifier.weight(1f)) {
+                    clipboard.setText(AnnotatedString(link.url))
+                    AppHaptics.voteCast()
+                    copied = true
+                }
+            }
+            LaunchedEffect(copied) {
+                if (copied) {
+                    kotlinx.coroutines.delay(3_000)
+                    copied = false
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "New link",
+                    style = Theme.emphasis(13f), color = Theme.court,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(Theme.surface, RoundedCornerShape(Theme.buttonRadius))
+                        .clickable(enabled = !busy) { onCreate() }
+                        .padding(vertical = 9.dp)
+                )
+                Text(
+                    "Disable",
+                    style = Theme.emphasis(13f), color = Theme.cork,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .weight(1f)
+                        .background(Theme.surface, RoundedCornerShape(Theme.buttonRadius))
+                        .clickable(enabled = !busy) { onDisable() }
+                        .padding(vertical = 9.dp)
+                )
+            }
+        }
+    }
+}

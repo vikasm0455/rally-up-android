@@ -135,6 +135,21 @@ data class SendInviteResult(
     val emailDelivery: String,
 )
 
+/** GET/POST /api/groups/invite-link — the group's shareable join link. */
+@Serializable
+data class InviteLink(
+    val url: String,
+    val expiresAt: ApiInstant,
+    val joinCount: Int,
+)
+
+/** GET wrapper: "no active link" decodes as link == null, so a request FAILURE
+ *  is distinguishable (throws) and never renders as "Create" (rotate!). */
+@Serializable
+data class InviteLinkState(
+    val link: InviteLink? = null,
+)
+
 @Serializable
 data class AutoPollConfig(
     val enabled: Boolean,
