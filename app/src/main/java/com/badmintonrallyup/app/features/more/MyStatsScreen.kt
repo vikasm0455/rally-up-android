@@ -5,6 +5,7 @@ package com.badmintonrallyup.app.features.more
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,14 +46,20 @@ import androidx.compose.material.icons.outlined.BarChart
 
 @Composable
 fun MyStatsScreen(onBack: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val prefs = remember { context.getSharedPreferences("rallyup", android.content.Context.MODE_PRIVATE) }
     var stats by remember { mutableStateOf<MyStats?>(null) }
     var failed by remember { mutableStateOf(false) }
+    var months by remember { mutableStateOf(prefs.getInt("statsMonths", 1)) }
+    val rangeLabel = if (months == 1) "last 5 weeks" else "last $months months"
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(months) {
+        prefs.edit().putInt("statsMonths", months).apply()
         try {
-            stats = ApiClient.get<MyStats>("/api/stats/me")
+            stats = ApiClient.get<MyStats>("/api/stats/me?months=$months")
+            failed = false
         } catch (e: Exception) {
-            failed = true
+            failed = stats == null
         }
     }
 
@@ -84,9 +91,10 @@ fun MyStatsScreen(onBack: () -> Unit) {
                         "${s.sessionsTotal} sessions all-time · private to you",
                         style = Theme.caption(11f), color = Theme.inkMuted
                     )
+                    RangePicker(months) { months = it }
                     StatTiles(s)
-                    WeeklyChart(s)
-                    KcalChart(s)
+                    WeeklyChart(s, rangeLabel)
+                    KcalChart(s, rangeLabel)
                     Text(
                         "Sessions count days you were in the confirmed attendance list (or voted yes when attendance wasn't confirmed). Court time counts courts you logged. All stats are private to you.",
                         style = Theme.caption(10.5f), color = Theme.inkMuted
@@ -146,16 +154,46 @@ private fun StatTiles(s: MyStats) {
 }
 
 @Composable
-private fun WeeklyChart(s: MyStats) {
+private fun RangePicker(selected: Int, onPick: (Int) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(Theme.chalk, RoundedCornerShape(12.dp))
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
+        listOf(1, 3, 6).forEach { m ->
+            val on = m == selected
+            Text(
+                "${m}M",
+                style = Theme.emphasis(13f),
+                color = if (on) androidx.compose.ui.graphics.Color.White else Theme.inkMuted,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .background(
+                        if (on) Theme.court.copy(alpha = 0.72f) else androidx.compose.ui.graphics.Color.Transparent,
+                        RoundedCornerShape(9.dp)
+                    )
+                    .clickable { onPick(m) }
+                    .padding(vertical = 7.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun WeeklyChart(s: MyStats, rangeLabel: String) {
     val maxCount = maxOf(1L, s.weeklySessions.maxOfOrNull { it.sessions } ?: 1L)
     Column(Modifier.card(13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row {
             Text("Sessions per week ", style = Theme.emphasis(12.5f), color = Theme.ink)
-            Text("· last 8 weeks", style = Theme.caption(11.5f), color = Theme.inkMuted)
+            Text("· $rangeLabel", style = Theme.caption(11.5f), color = Theme.inkMuted)
         }
+        val labelEvery = maxOf(1, Math.round(s.weeklySessions.size / 6.0f))
         Row(
             Modifier.fillMaxWidth().height(104.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (s.weeklySessions.size > 13) 2.dp else 6.dp),
             verticalAlignment = Alignment.Bottom
         ) {
             s.weeklySessions.forEachIndexed { index, week ->
@@ -166,12 +204,13 @@ private fun WeeklyChart(s: MyStats) {
                             .height(maxOf(4f, week.sessions.toFloat() / maxCount * 84f).dp)
                             .background(
                                 Theme.court.copy(alpha = if (index == s.weeklySessions.size - 1) 1f else 0.42f),
-                                RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)
+                                RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp)
                             )
                     )
                     Text(
-                        week.weekStart.drop(5).replace("-", "/"),
-                        style = Theme.caption(8f), color = Theme.inkMuted,
+                        if (index % labelEvery == 0 || index == s.weeklySessions.size - 1)
+                            week.weekStart.drop(5).replace("-", "/") else " ",
+                        style = Theme.caption(7.5f), color = Theme.inkMuted, maxLines = 1,
                         textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()
                     )
                 }
@@ -181,11 +220,11 @@ private fun WeeklyChart(s: MyStats) {
 }
 
 @Composable
-private fun KcalChart(s: MyStats) {
+private fun KcalChart(s: MyStats, rangeLabel: String) {
     Column(Modifier.card(13.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row {
             Text("Calories per session ", style = Theme.emphasis(12.5f), color = Theme.ink)
-            Text("· last 30 days", style = Theme.caption(11.5f), color = Theme.inkMuted)
+            Text("· $rangeLabel", style = Theme.caption(11.5f), color = Theme.inkMuted)
         }
         if (s.kcalSeries.isEmpty()) {
             Text(
