@@ -346,3 +346,27 @@ data class BlockedUser(
     val id: ApiUUID,
     val displayName: String,
 )
+
+// Personal stats (GET /api/stats/me) — day-dates arrive as "YYYY-MM-DD"
+// strings (no time component), so they stay String here.
+
+@Serializable
+data class StatsWeekBucket(val weekStart: String, val sessions: Long)
+
+@Serializable
+data class StatsKcalPoint(val date: String, val kcal: Int)
+
+@Serializable
+data class MyStats(
+    val sessionsTotal: Long,
+    val sessionsThisMonth: Long,
+    val sessionsLastMonth: Long,
+    val currentStreakWeeks: Long,
+    val bestStreakWeeks: Long,
+    val courtMinutesThisMonth: Long,
+    val courtMinutesLastMonth: Long,
+    val avgKcalPerSession: Long? = null,
+    val yesRatePercent: Long? = null,
+    val weeklySessions: List<StatsWeekBucket>,
+    val kcalSeries: List<StatsKcalPoint>,
+)

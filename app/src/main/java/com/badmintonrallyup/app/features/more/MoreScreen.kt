@@ -59,11 +59,17 @@ fun MoreScreen() {
     var showKcal by rememberSaveable { mutableStateOf(false) }
     var showHistory by rememberSaveable { mutableStateOf(false) }
     var showBlocked by rememberSaveable { mutableStateOf(false) }
+    var showStats by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     // AppLock.enabled is prefs-backed (not observable) — mirror it locally so
     // the switch recomposes, same behavior as the iOS binding.
     var lockEnabled by remember { mutableStateOf(appLock.enabled) }
 
+    if (showStats) {
+        BackHandler { showStats = false }
+        MyStatsScreen(onBack = { showStats = false })
+        return
+    }
     if (showBlocked) {
         BackHandler { showBlocked = false }
         BlockedMembersScreen(onBack = { showBlocked = false })
@@ -187,6 +193,15 @@ fun MoreScreen() {
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { showBlocked = true }
+                        .padding(horizontal = 14.dp, vertical = 13.dp)
+                )
+                HorizontalDivider(color = Theme.line, thickness = 1.dp)
+                Text(
+                    "My stats",
+                    style = Theme.body(15f), color = Theme.ink,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showStats = true }
                         .padding(horizontal = 14.dp, vertical = 13.dp)
                 )
                 HorizontalDivider(color = Theme.line, thickness = 1.dp)
