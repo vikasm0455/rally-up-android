@@ -50,13 +50,20 @@ fun MyStatsScreen(onBack: () -> Unit) {
     val prefs = remember { context.getSharedPreferences("rallyup", android.content.Context.MODE_PRIVATE) }
     var stats by remember { mutableStateOf<MyStats?>(null) }
     var failed by remember { mutableStateOf(false) }
+    // months: 1/3/6 presets; 0 = custom weeks.
     var months by remember { mutableStateOf(prefs.getInt("statsMonths", 1)) }
-    val rangeLabel = if (months == 1) "last 5 weeks" else "last $months months"
+    var weeks by remember { mutableStateOf(prefs.getInt("statsWeeks", 8)) }
+    val rangeLabel = when (months) {
+        0 -> "last $weeks week" + if (weeks == 1) "" else "s"
+        1 -> "last 5 weeks"
+        else -> "last $months months"
+    }
 
-    LaunchedEffect(months) {
-        prefs.edit().putInt("statsMonths", months).apply()
+    LaunchedEffect(months, weeks) {
+        prefs.edit().putInt("statsMonths", months).putInt("statsWeeks", weeks).apply()
+        val query = if (months == 0) "weeks=$weeks" else "months=$months"
         try {
-            stats = ApiClient.get<MyStats>("/api/stats/me?months=$months")
+            stats = ApiClient.get<MyStats>("/api/stats/me?$query")
             failed = false
         } catch (e: Exception) {
             failed = stats == null
@@ -92,6 +99,31 @@ fun MyStatsScreen(onBack: () -> Unit) {
                         style = Theme.caption(11f), color = Theme.inkMuted
                     )
                     RangePicker(months) { months = it }
+                    if (months == 0) {
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .card(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Text(
+                                "−", style = Theme.display(20f),
+                                color = if (weeks > 1) Theme.court else Theme.inkMuted,
+                                modifier = Modifier.clickable { if (weeks > 1) weeks -= 1 }.padding(horizontal = 10.dp)
+                            )
+                            Text(
+                                "$weeks week" + (if (weeks == 1) "" else "s"),
+                                style = Theme.emphasis(14f), color = Theme.ink,
+                                textAlign = TextAlign.Center, modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                "+", style = Theme.display(20f),
+                                color = if (weeks < 26) Theme.court else Theme.inkMuted,
+                                modifier = Modifier.clickable { if (weeks < 26) weeks += 1 }.padding(horizontal = 10.dp)
+                            )
+                        }
+                    }
                     StatTiles(s)
                     WeeklyChart(s, rangeLabel)
                     KcalChart(s, rangeLabel)
@@ -162,10 +194,10 @@ private fun RangePicker(selected: Int, onPick: (Int) -> Unit) {
             .padding(3.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp)
     ) {
-        listOf(1, 3, 6).forEach { m ->
+        listOf(1, 3, 6, 0).forEach { m ->
             val on = m == selected
             Text(
-                "${m}M",
+                if (m == 0) "Custom" else "${m}M",
                 style = Theme.emphasis(13f),
                 color = if (on) androidx.compose.ui.graphics.Color.White else Theme.inkMuted,
                 textAlign = TextAlign.Center,
