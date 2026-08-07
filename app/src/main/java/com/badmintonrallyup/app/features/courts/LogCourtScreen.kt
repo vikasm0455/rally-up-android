@@ -49,12 +49,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.badmintonrallyup.app.api.ApiClient
 import com.badmintonrallyup.app.api.ApiUUID
 import com.badmintonrallyup.app.api.CredentialView
+import com.badmintonrallyup.app.api.GroupBrief
 import com.badmintonrallyup.app.api.GroupCandidate
 import com.badmintonrallyup.app.api.GroupDetail
 import com.badmintonrallyup.app.api.OcrResult
@@ -133,6 +135,7 @@ fun LogCourtScreen(editing: ReservationView? = null, onDone: () -> Unit, onClose
     var error by remember { mutableStateOf<String?>(null) }
     var range by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var ocrBusy by remember { mutableStateOf(false) }
+    var groupNames by remember { mutableStateOf<Map<UUID, String>>(emptyMap()) }
     var groupChoices by remember { mutableStateOf<List<GroupCandidate>>(emptyList()) }
 
     val inRange = run {
@@ -165,8 +168,11 @@ fun LogCourtScreen(editing: ReservationView? = null, onDone: () -> Unit, onClose
                 } catch (_: Exception) {
                 }
             }
+            // scope=all — same as the initial load. Without it this silently
+            // narrows the visible list to the active group, hiding any
+            // cross-group logins that were showing a moment earlier.
             credentials = try {
-                ApiClient.get("/api/credentials/today")
+                ApiClient.get("/api/credentials/today?scope=all")
             } catch (_: Exception) {
                 credentials
             }
@@ -263,6 +269,11 @@ fun LogCourtScreen(editing: ReservationView? = null, onDone: () -> Unit, onClose
         } catch (_: Exception) {
             emptyList()
         }
+        groupNames = try {
+            ApiClient.get<List<GroupBrief>>("/api/groups").associate { it.id to it.name }
+        } catch (_: Exception) {
+            emptyMap()
+        }
         if (editing != null) {
             courtNumber = "${editing.courtNumber}"
             courtType = editing.courtType
@@ -298,7 +309,7 @@ fun LogCourtScreen(editing: ReservationView? = null, onDone: () -> Unit, onClose
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 credentials.forEach { c ->
-                    CredentialRow(c = c, isPicked = picked.contains(c.id)) {
+                    CredentialRow(c = c, isPicked = picked.contains(c.id), groupNames = groupNames) {
                         picked = if (picked.contains(c.id)) picked - c.id else picked + c.id
                         AppHaptics.voteCast()
                     }
@@ -355,30 +366,46 @@ fun LogCourtScreen(editing: ReservationView? = null, onDone: () -> Unit, onClose
             }
 
             SectionLabel("Duration")
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth()
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.card(12.dp)
             ) {
-                listOf(15, 30, 45).forEach { m ->
-                    val sel = duration == m
-                    val shape = RoundedCornerShape(10.dp)
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .background(
-                                if (sel) Theme.court.copy(alpha = 0.72f) else Theme.surface,
-                                shape
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Spacer(Modifier.weight(1f))
+                    StepperRow(value = duration, range = 1..45) { duration = it }
+                    Text(" min", style = Theme.emphasis(15f), color = Theme.inkMuted)
+                    Spacer(Modifier.weight(1f))
+                }
+                // Any 1–45 works (joining a court partway through), but these
+                // three jump straight to the common cases.
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    listOf(15, 30, 45).forEach { m ->
+                        val sel = duration == m
+                        val shape = RoundedCornerShape(8.dp)
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .background(
+                                    if (sel) Theme.court.copy(alpha = 0.18f) else Theme.chalk,
+                                    shape
+                                )
+                                .border(1.dp, if (sel) Theme.court else Theme.line, shape)
+                                .clip(shape)
+                                .clickable { duration = m }
+                                .padding(vertical = 6.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                "$m", style = Theme.caption(12f),
+                                color = if (sel) Theme.court else Theme.inkMuted
                             )
-                            .border(1.dp, if (sel) Color.Transparent else Theme.line, shape)
-                            .clip(shape)
-                            .clickable { duration = m }
-                            .padding(vertical = 9.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "$m min", style = Theme.emphasis(13f),
-                            color = if (sel) Color.White else Theme.inkMuted
-                        )
+                        }
                     }
                 }
             }
@@ -455,8 +482,23 @@ fun LogCourtScreen(editing: ReservationView? = null, onDone: () -> Unit, onClose
     }
 }
 
+/** The one group name worth showing on this row: which group is USING it
+ *  (in-use — already privacy-filtered server-side), else the group it's
+ *  shared to (first, +N more if several), else null for an unshared post. */
+private fun groupLabel(c: CredentialView, groupNames: Map<UUID, String>): String? {
+    c.inUseGroupName?.let { return it }
+    val names = c.sharedGroupIds.mapNotNull { groupNames[it] }
+    val first = names.firstOrNull() ?: return null
+    return if (names.size > 1) "$first +${names.size - 1}" else first
+}
+
 @Composable
-private fun CredentialRow(c: CredentialView, isPicked: Boolean, onToggle: () -> Unit) {
+private fun CredentialRow(
+    c: CredentialView,
+    isPicked: Boolean,
+    groupNames: Map<UUID, String>,
+    onToggle: () -> Unit,
+) {
     val disabled = c.inUse && !isPicked
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -471,10 +513,20 @@ private fun CredentialRow(c: CredentialView, isPicked: Boolean, onToggle: () -> 
             null, Modifier.size(18.dp),
             tint = if (isPicked) Theme.court else Theme.line
         )
-        Text(
-            c.bintangName, style = Theme.body(14f),
-            color = if (disabled) Theme.inkMuted else Theme.ink
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(
+                c.bintangName, style = Theme.body(14f),
+                color = if (disabled) Theme.inkMuted else Theme.ink
+            )
+            Text(
+                c.bintangPassword,
+                style = Theme.emphasis(12.5f).copy(fontFamily = FontFamily.Monospace),
+                color = if (disabled) Theme.inkMuted.copy(alpha = 0.7f) else Theme.cork
+            )
+            groupLabel(c, groupNames)?.let { group ->
+                Text(group, style = Theme.caption(10.5f), color = Theme.inkMuted)
+            }
+        }
         Spacer(Modifier.weight(1f))
         StatusBadge(text = c.inUseLabel, kind = if (c.inUse) BadgeKind.Used else BadgeKind.Free)
     }
